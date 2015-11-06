@@ -2,6 +2,10 @@
 #complexDissect.py
 '''
 A small utility for comparing sets of protein complexes.
+
+Secondary goal: predict conservation of complexes across species using
+protein orthology.
+
 INPUT: 
 Two files. Assumed to have names like "complexes*.txt" 
 but will take input for names
@@ -21,6 +25,21 @@ IDs will be converted to Uniprot IDs.
 Proteins may belong to more than one complex, as shown above, so
 interactors may not be unique but lines will be.
 
+"Short" format files can also be parsed. These have the following format:
+ComplexID	Proteins
+A	ID1	ID2
+B	ID3	ID4
+C	ID4
+
+Each line contains a complex name/identifier, followed by each of the
+components of the complex, separated by tabs.
+So if the data looks like this (e.g., Hu et al 2009, table S7):
+
+CplxID	Complex_members
+1	b1234	b1235	b1236
+
+then it can be converted into "long" format.
+
 OUTPUT:
 A file indicating, for each "experimental" complex, conservation
 in the model, both within a complex and across the full set.
@@ -30,13 +49,6 @@ experimental set, may be in a completely different complex.
 
 Uses ecoli.txt ID conversion file provided by Uniprot/Swiss-Prot.
 
-Will also break down complexes into lists of the format shown above,
-so if the data looks like this (e.g., Hu et al 2009, table S7):
-
-CplxID	Complex_members
-1	b1234	b1235	b1236
-
-then it can be converted into "long" format.
 '''
 import glob, os, re, requests, sys, urllib2
 from collections import Counter
@@ -157,6 +169,7 @@ def compareSets(filename1, name1, filename2, name2, mode):
 					con_members_conserved = con_members_conserved +1	#Increment its conservation by one
 					if complex_member not in members_counted:
 						any_conserved = any_conserved +1
+					members_counted.append(complex_member)
 					complex_con = float(con_members_conserved)/len(model_complexes[model_complex])
 					if complex_con > exp_conservation[complex_name][0]:	#Set maximum complex conservation to the largest value
 						exp_conservation[complex_name][0] = complex_con
@@ -166,7 +179,7 @@ def compareSets(filename1, name1, filename2, name2, mode):
 	#Output for each exp. complex:
 	#maximum conservation in a single complex
 	#conservation across the complete model set, in any complex		
-	compared_file_name = "complexes_compared.txt"
+	compared_file_name = "complexes_compared_" + name1 + "_vs_" + name2 + ".txt"
 	with open(compared_file_name, "w+b") as compared_file:
 		compared_file.write(name1 + "_Complex\tMaxComplexCon\tSetCon\n")
 		for complex_name in exp_conservation:
@@ -176,6 +189,11 @@ def compareSets(filename1, name1, filename2, name2, mode):
 	
 	return compared_file_name
 	
+def compareSpecies(filename1, name1):
+	print("Work in progress.")
+	compared_file_name = "temp.txt"
+	return compared_file_name	
+
 ##Main
 print("Ready to compare protein complex sets.")
 mode = "default"
@@ -197,16 +215,16 @@ if convert_choice.lower() == "y":
 			have_short_file = True
 	long_file_name = convertToLong(short_file_name)
 	print("Long format file is available: %s" % long_file_name)
-	
-complex_file_list = glob.glob('complexes*.txt')
+
+complex_file_list = glob.glob('complexes*.txt')	
 if len(complex_file_list) >2:
 	sys.exit("Found more than two complex files. Check for duplicates.")
 if len(complex_file_list) == 2:
 	filename1 = complex_file_list[0]
 	filename2 = complex_file_list[1]
 	print("Found two protein complex files:\n%s\n%s" % (filename1, filename2))
-	name1 = raw_input("Please provide a short name for the first set.\n")
-	name2 = raw_input("Please provide a short name for the second set.\n")
+	name1 = raw_input("Please provide a short name for the first (experimental) set.\n")
+	name2 = raw_input("Please provide a short name for the second (model) set.\n")
 	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
 if len(complex_file_list) <2:
 	print("Less than two protein complex files found. Provide their names, please.")
@@ -228,6 +246,26 @@ if len(complex_file_list) <2:
 		else:
 			name2 = raw_input("Please provide a short name for this set.\n")
 			have_file_2 = True
+	
+model_comparison_choice = raw_input("Do you need to compare the complex set to a model set? Y/N\n")
+if model_comparison_choice.lower() == "y":
+	model_comparison = True
+else:
+	model_comparison = False
+
+taxon_comparison_choice = raw_input("Do you need to compare the complex set across species? Y/N\n")
+if taxon_comparison_choice.lower() == "y":
+	taxon_comparison = True
+else:
+	taxon_comparison = False
+
+if model_comparison == True:
 	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
+	print("Model comparison complete. See %s." % compared_file_name)
+
+if taxon_comparison == True:
+	taxcompare_file_name = compareSpecies(filename1, name1)
+	print("Broad taxonomic comparison complete. See %s." % taxcompare_file_name)
+
 
 
