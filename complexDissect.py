@@ -148,8 +148,8 @@ def convertToLong(filename):
 	return(long_file_name)
 	
 def compareSets(filename1, name1, filename2, name2, mode):
-	#file1 is the "experimental" file
-	#file2 is the model file
+	#filename1 is the "experimental" file
+	#filename2 is the model file
 	#name variables are used to identify complexes, as their names may
 	#be very similar or even just integers.
 	#Mode determines if we need to convert interactor IDs.
@@ -201,7 +201,7 @@ def compareSets(filename1, name1, filename2, name2, mode):
 	#Output for each exp. complex:
 	#maximum conservation in a single complex
 	#conservation across the complete model set, in any complex		
-	compared_file_name = "complexes_compared_" + name1 + "_vs_" + name2 + ".txt"
+	compared_file_name = "compared_complexes_" + name1 + "_vs_" + name2 + ".txt"
 	with open(compared_file_name, "w+b") as compared_file:
 		compared_file.write(name1 + "_Complex\tMaxComplexCon\tSetCon\n")
 		for complex_name in exp_conservation:
@@ -211,17 +211,54 @@ def compareSets(filename1, name1, filename2, name2, mode):
 	
 	return compared_file_name
 	
-def compareSpecies(filename1, name1):
-	print("Work in progress.")
-	compared_file_name = "temp.txt"
-	return compared_file_name	
+def compareSpecies(filename1, name1, id_conversion):
+	#filename1 is the "experimental" file
+	#name1 is the short name of the set
+	#id_conversion is a dictionary with UniprotAC's as keys
+	#and values of two types. For E. coli those types are bcode and
+	#JW-code, in that order.
+	
+	print("Species comparison: Work in progress.")
+	component_con_file_name = name1 + "_component_conservation.txt"
+	cplx_con_file_name = name1 + "_complex_conservation.txt"
+	
+	exp_complexes = {} #Complex names are keys, members are values
+	
+	with open(filename1) as file1:
+		file1.readline()	#skip the header
+		for line in file1:
+			line_content = (line.rstrip()).split()
+			complex_name = name1 + "_" + line_content[1]
+			if complex_name in exp_complexes:
+				exp_complexes[complex_name].append(line_content[0])
+			else:
+				exp_complexes[complex_name] = [line_content[0]]
+	
+	unified_components = []		#All protein complex components, as UPIDs	
+	for name in exp_complexes:
+		for component in exp_complexes[name]:
+			for identifier in id_conversion:
+				expanded_ids = id_conversion[identifier]
+				if component in expanded_ids:
+					#print(component + "\t" + identifier)
+					unified_components.append(identifier)
+	print("Searching for conservation of %s unique proteins." % len(unified_components))
+	
+	with open(component_con_file_name, "w+b") as compared_file:
+		compared_file.write("EMPTY")
+		
+	with open(cplx_con_file_name, "w+b") as compared_file:
+		compared_file.write("EMPTY")
+
+	compared_file_names = [component_con_file_name, cplx_con_file_name]
+	return compared_file_names	
 
 ##Main
 print("Ready to compare protein complex sets.")
 mode = "default"
 is_this_ecoli = raw_input("Will you need to convert E. coli locus IDs? Y/N\n")
 if is_this_ecoli.lower() == "y":
-	getEcoliIDs()
+	id_conversion = getEcoliIDs()
 	mode = "ecoli"
 else:
 	print("OK.")
@@ -269,25 +306,17 @@ if len(complex_file_list) <2:
 			name2 = raw_input("Please provide a short name for this set.\n")
 			have_file_2 = True
 	
-model_comparison_choice = raw_input("Do you need to compare the complex set to a model set? Y/N\n")
+model_comparison_choice = raw_input("Compare the experimental complex set to the model set? Y/N\n")
 if model_comparison_choice.lower() == "y":
-	model_comparison = True
+	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
+	print("Model comparison complete. See %s." % compared_file_name)
 else:
 	model_comparison = False
 
-taxon_comparison_choice = raw_input("Do you need to compare the complex set across species? Y/N\n")
+taxon_comparison_choice = raw_input("Compare the experimental complex set across species? Y/N\n")
 if taxon_comparison_choice.lower() == "y":
-	taxon_comparison = True
+	taxcompare_file_names = compareSpecies(filename1, name1, id_conversion)
+	print("Broad taxonomic comparison complete. See %s." % taxcompare_file_names[0])
 else:
 	taxon_comparison = False
-
-if model_comparison == True:
-	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
-	print("Model comparison complete. See %s." % compared_file_name)
-
-if taxon_comparison == True:
-	taxcompare_file_name = compareSpecies(filename1, name1)
-	print("Broad taxonomic comparison complete. See %s." % taxcompare_file_name)
-
-
 
