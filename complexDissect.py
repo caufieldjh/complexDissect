@@ -6,6 +6,11 @@ A small utility for comparing sets of protein complexes.
 Secondary goal: predict conservation of complexes across species using
 protein orthology.
 
+Tertiary goal: allows exploration of specific protein complexes to 
+retreive details like best match, size, and functional details.
+
+Requires several Gb of disk space to store mapping files.
+
 INPUT: 
 Two files. Assumed to have names like "complexes*.txt" 
 but will take input for names
@@ -48,6 +53,23 @@ in the model set but protein C, though in that complex in the
 experimental set, may be in a completely different complex.
 
 Uses ecoli.txt ID conversion file provided by Uniprot/Swiss-Prot.
+
+IN PROGRESS: Enabling broad cross-genome complex conservation prediction.
+0. Map components to Uniprot IDs if not done so already
+	For E. coli, use ecoli.txt.
+1. Map Uniprot IDs of components to eggNOG IDs.
+	Uses eggnog4.protein_id_conversion.tsv and members files.
+	(Code re-use happens here.)
+	Map UPID to eggNOG protein ID, then to NOG ID.
+2. Determine all taxids component is present in.
+	This information is built into the eggNOG protein ID, so it
+	can actually be obtained in the previous step.
+	Produce a binary matrix of components vs. taxids.
+3. Combine components into their respective complexes.
+	Produce a matrix of complexes vs. taxids, where values are 
+	each (components present/components in model complex).
+4. Use output to produce tree and heatmap. This happens outside the
+	software. Model on Caufield et al. 2015 PLoS Comp Bio.
 
 '''
 import glob, os, re, requests, sys, urllib2
