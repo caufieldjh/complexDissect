@@ -218,7 +218,7 @@ def compareSpecies(filename1, name1, id_conversion):
 	#and values of two types. For E. coli those types are bcode and
 	#JW-code, in that order.
 	
-	print("Species comparison: Work in progress.")
+	print("***Species comparison: Work in progress.***")
 	component_con_file_name = name1 + "_component_conservation.txt"
 	cplx_con_file_name = name1 + "_complex_conservation.txt"
 	
@@ -283,8 +283,6 @@ if len(complex_file_list) == 2:
 	filename2 = complex_file_list[1]
 	print("Found two protein complex files:\n%s\n%s" % (filename1, filename2))
 	name1 = raw_input("Please provide a short name for the first (experimental) set.\n")
-	name2 = raw_input("Please provide a short name for the second (model) set.\n")
-	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
 if len(complex_file_list) <2:
 	print("Less than two protein complex files found. Provide their names, please.")
 	have_file_1 = False
@@ -308,6 +306,7 @@ if len(complex_file_list) <2:
 	
 model_comparison_choice = raw_input("Compare the experimental complex set to the model set? Y/N\n")
 if model_comparison_choice.lower() == "y":
+	name2 = raw_input("Please provide a short name for the second (model) set.\n")
 	compared_file_name = compareSets(filename1, name1, filename2, name2, mode)
 	print("Model comparison complete. See %s." % compared_file_name)
 else:
