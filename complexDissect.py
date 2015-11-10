@@ -72,7 +72,7 @@ IN PROGRESS: Enabling broad cross-genome complex conservation prediction.
 	software. Model on Caufield et al. 2015 PLoS Comp Bio.
 
 '''
-import glob, os, re, requests, sys, urllib2
+import glob, gzip, os, re, requests, sys, urllib2
 from collections import Counter
 from datetime import date
 
@@ -218,11 +218,202 @@ def compareSpecies(filename1, name1, id_conversion):
 	#and values of two types. For E. coli those types are bcode and
 	#JW-code, in that order.
 	
+	#This method requires the eggNOG map files and downloads them if needed
+	
+	def get_eggnog_maps(): 
+		#Download and unzip the eggNOG ID conversion file 
+		#Filters file to just Uniprot IDs; the resulting file is the map file.
+		#One Uniprot ID may correspond to multiple OGs - e.g. COG1234,COG3810,COG9313. 
+		#these cases are considered OGs in their own right as this may indicate a pattern of conserved sequences on its own 
+		baseURL = "http://eggnogdb.embl.de/download/latest/"
+		convfilename = "eggnog4.protein_id_conversion.tsv.gz "	#File contains ALL database identifiers and corresponding proteins
+		
+		convfilepath = baseURL + convfilename
+		outfilepath = convfilename[0:-3]
+		have_mapping_file = 0
+		if os.path.isfile(convfilename): 
+			print("Found compressed ID conversion file on disk: %s" % convfilename)
+			decompress_convfile = 1
+			have_mapping_file = 1
+		if os.path.isfile(outfilepath): 
+			print("Found ID conversion file on disk: %s" % outfilepath)
+			decompress_convfile = 0
+			have_mapping_file = 1
+		if have_mapping_file == 0:
+			print("Downloading latest ID mapping file - this file is ~400 Mb compressed so this may take some time.")
+			print("Downloading from %s" % convfilepath)
+			response = urllib2.urlopen(convfilepath)
+			compressed_file = open(os.path.basename(convfilename), "w+b") #Start local compressed file
+			chunk = 1048576
+			while 1:
+				data = (response.read(chunk)) #Read one Mb at a time
+				compressed_file.write(data)
+				if not data:
+					print("\n%s file download complete." % convfilename)
+					compressed_file.close()
+					break
+				sys.stdout.write(".")
+			decompress_convfile = 1
+			
+		if decompress_convfile == 1:
+			print("Decompressing map file. Lines written, in millions:")
+			#Done in chunks since it's a large file
+			with gzip.open(convfilename) as infile: #Open that compressed file, read and write to uncompressed file
+				outfile = open(outfilepath, "w+b")
+				linecount = 0
+				for line in infile:
+					outfile.write(line)
+					linecount = linecount +1
+					if linecount % 100000 == 0:
+							sys.stdout.write(".")
+					if linecount % 1000000 == 0:
+							sys.stdout.write(str(linecount/1000000))
+				infile.close()
+			newconvfilename = outfilepath
+			outfile.close()
+		
+		#Download and decompress member NOG files (2 of them)
+		nogURL = baseURL + "data/NOG/"
+		nogfilename = "NOG.members.tsv.gz"
+		bactnogURL = baseURL + "data/bactNOG/"
+		bactnogfilename = "bactNOG.members.tsv.gz" 
+		all_nog_locations = [[nogURL, nogfilename], [bactnogURL, bactnogfilename]]
+		
+		for location in all_nog_locations:
+			baseURL = location[0]
+			memberfilename = location[1]
+			memberfilepath = baseURL + memberfilename
+			outfilepath = memberfilename[0:-3]
+			if os.path.isfile(memberfilename): 
+				print("\nFound compressed NOG membership file on disk: %s" % memberfilename)
+				decompress_memberfile = 1
+			if os.path.isfile(outfilepath): 
+				print("\nFound NOG membership file on disk: %s" % outfilepath)
+				decompress_memberfile = 0
+			else:
+				print("\nDownloading NOG membership file - this may take some time.")
+				print("Downloading from %s" % memberfilepath)
+				response = urllib2.urlopen(memberfilepath)
+				compressed_file = open(os.path.basename(memberfilename), "w+b") #Start local compressed file
+				chunk = 1048576
+				while 1:
+					data = (response.read(chunk)) #Read one Mb at a time
+					compressed_file.write(data)
+					if not data:
+						print("\n%s file download complete." % memberfilename)
+						compressed_file.close()
+						break
+					sys.stdout.write(".")
+				decompress_memberfile = 1
+				
+			if decompress_memberfile == 1:
+				print("Decompressing NOG membership file %s" % memberfilename)
+				#Done in chunks since it's a large file
+				with gzip.open(memberfilename) as infile: #Open that compressed file, read and write to uncompressed file
+					outfile = open(outfilepath, "w+b")
+					linecount = 0
+					for line in infile:
+						outfile.write(line)
+						linecount = linecount +1
+						if linecount % 100000 == 0:
+							sys.stdout.write(".")
+						if linecount % 1000000 == 0:
+							sys.stdout.write(str(linecount/1000000))
+					infile.close()
+				outfile.close()
+				
+		#Clean up by removing compressed files
+		print("\nRemoving compressed files.")
+		all_compressed_files = [convfilename, nogfilename, bactnogfilename]
+		for filename in all_compressed_files:
+			if os.path.isfile(filename):
+				os.remove(filename)
+		
+		#Load and filter the ID conversion file as dictionary
+		print("Parsing ID conversion file. Lines read, in millions:")
+		with open(convfilename[0:-3]) as infile:
+			id_dict = {}	#Dictionary of eggNOG protein IDs with database IDs as keys
+			#Gets filtered down to relevant database IDs (i.e., Uniprot IDs)
+			linecount = 0
+			for line in infile:
+				linecount = linecount +1
+				line_raw = ((line.rstrip()).split("\t"))	#Protein IDs are split for some reason; merge them
+				one_id_set = [line_raw[0] + "." + line_raw[1], line_raw[2], line_raw[3]]
+				if "UniProt_AC" in one_id_set[2]:
+					id_dict[one_id_set[1]] = one_id_set[0]
+				if linecount % 100000 == 0:
+					sys.stdout.write(".")
+				if linecount % 1000000 == 0:
+					sys.stdout.write(str(linecount/1000000))
+			infile.close()
+	
+		#Use filtered ID conversion input to map to NOG members
+		print("\nReading NOG membership files.")
+		all_nog_filenames = [nogfilename[0:-3], bactnogfilename[0:-3]]
+		nog_members = {}	#Dictionary of NOG ids with protein IDs as keys (need to split entries for each)
+		nog_count = 0
+		for filename in all_nog_filenames:
+			temp_nog_members = {}	#We will have duplicates within each set but don't want to lose the information.
+			print("Reading from %s" % filename)
+			with open(filename) as infile:
+				for line in infile:
+					nog_count = nog_count +1
+					line_raw = ((line.rstrip()).split("\t"))
+					nog_id = line_raw[1]
+					line_members = line_raw[5].split(",")
+					for protein_id in line_members:			#The same protein could be in more than one OG at the same level
+						if protein_id in temp_nog_members:
+							temp_nog_members[protein_id] = temp_nog_members[protein_id] + "," + nog_id
+						else:
+							temp_nog_members[protein_id] = nog_id
+				infile.close()
+			nog_members.update(temp_nog_members)
+		
+		upids_length = str(len(id_dict))
+		nogs_length = str(nog_count)
+		proteins_length = str(len(nog_members))
+		
+		print("Mapping %s Uniprot IDs to %s NOGs through %s eggNOG protein IDs:" % (upids_length, nogs_length, proteins_length))
+		upid_to_NOG = {}	#Conversion dictionary. Values are OGs, keys are UPIDs.
+		mapped_count = 0	#upids mapped to nogs.
+		for upid in id_dict:
+			if id_dict[upid] in nog_members:
+				upid_to_NOG[upid] = nog_members[id_dict[upid]]
+				mapped_count = mapped_count +1
+				if mapped_count % 100000 == 0:
+					sys.stdout.write(".")
+				if mapped_count % 1000000 == 0:
+					sys.stdout.write(str(mapped_count/1000000))
+			
+		#Use this mapping to build map file, named "uniprot_og_maps_*.txt"
+		print("Writing map file.")
+		nowstring = (date.today()).isoformat()
+		mapfilename = "uniprot_og_maps_" + nowstring + ".txt"
+		mapfile = open(mapfilename, "w+b")
+		for mapping in upid_to_NOG:
+			mapfile.write(mapping + "\t" + upid_to_NOG[mapping] + "\n")	#Each line is a uniprot ID and an OG id
+		mapfile.close()
+	
 	print("***Species comparison: Work in progress.***")
 	component_con_file_name = name1 + "_component_conservation.txt"
 	cplx_con_file_name = name1 + "_complex_conservation.txt"
 	
 	exp_complexes = {} #Complex names are keys, members are values
+	uniprot_to_og = {} #Uniprot IDs are keys, members are eggNOG OG IDs
+	
+	map_file_list = glob.glob("uniprot_og_maps_*.txt")
+	if len(map_file_list) >0:
+		if len(map_file_list) == 1:
+			print("Found map file %s on disk." % map_file_list[0])
+			with open(map_file_list[0]) as id_map_file:
+				for line in id_map_file:
+					line_content = (line.rstrip()).split("\t")
+					uniprot_to_og[line_content[0]] = line_content[1]
+		else:
+			sys.exit("Found more than one map file on disk. Please check for duplicates.")
+	else:
+		print("Could not find protein ID map file. Attempting to rebuild...")
+		get_eggnog_maps()
 	
 	with open(filename1) as file1:
 		file1.readline()	#skip the header
@@ -234,7 +425,8 @@ def compareSpecies(filename1, name1, id_conversion):
 			else:
 				exp_complexes[complex_name] = [line_content[0]]
 	
-	unified_components = []		#All protein complex components, as UPIDs	
+	unified_components = []		#All protein complex components, as UPIDs
+	component_ogs = {}	#Component UPIDs are keys, members are corresponding OGs	
 	for name in exp_complexes:
 		for component in exp_complexes[name]:
 			for identifier in id_conversion:
@@ -242,7 +434,17 @@ def compareSpecies(filename1, name1, id_conversion):
 				if component in expanded_ids:
 					#print(component + "\t" + identifier)
 					unified_components.append(identifier)
+	
 	print("Searching for conservation of %s unique proteins." % len(unified_components))
+	unmapped_components = []	#Any UPID not found in the eggNOG ID conversion file
+	for component in unified_components:
+		if component in uniprot_to_og:
+			component_ogs[component] = uniprot_to_og[component]
+		else:
+			component_ogs[component] = component
+			unmapped_components.append(component)
+	print("Mapped complex components to %s OGs." % len(component_ogs))
+	print("%s complex components did not map to OGs." % len(unmapped_components))
 	
 	with open(component_con_file_name, "w+b") as compared_file:
 		compared_file.write("EMPTY")
