@@ -64,7 +64,7 @@ IN PROGRESS: Enabling broad cross-genome complex conservation prediction.
 2. Determine all taxids component is present in.
 	This information is built into the eggNOG protein ID, so it
 	can actually be obtained in the previous step.
-	Produce a binary matrix of components vs. taxids.
+	Produce a binary matrix of components (as OGs) vs. taxids.
 3. Combine components into their respective complexes.
 	Produce a matrix of complexes vs. taxids, where values are 
 	each (components present/components in model complex).
@@ -352,6 +352,7 @@ def compareSpecies(filename1, name1, id_conversion):
 		all_nog_filenames = [nogfilename[0:-3], bactnogfilename[0:-3]]
 		nog_members = {}	#Dictionary of NOG ids with protein IDs as keys (need to split entries for each)
 		nog_count = 0
+		og_taxid_map = {} #OG ids are keys, all taxids they have members in are values
 		for filename in all_nog_filenames:
 			temp_nog_members = {}	#We will have duplicates within each set but don't want to lose the information.
 			print("Reading from %s" % filename)
@@ -361,7 +362,11 @@ def compareSpecies(filename1, name1, id_conversion):
 					line_raw = ((line.rstrip()).split("\t"))
 					nog_id = line_raw[1]
 					line_members = line_raw[5].split(",")
+					og_taxid_map[nog_id] = []
 					for protein_id in line_members:			#The same protein could be in more than one OG at the same level
+						taxid = (protein_id.split("."))[0]
+						if taxid not in og_taxid_map[nog_id]:
+							og_taxid_map[nog_id].append(taxid)
 						if protein_id in temp_nog_members:
 							temp_nog_members[protein_id] = temp_nog_members[protein_id] + "," + nog_id
 						else:
@@ -393,27 +398,52 @@ def compareSpecies(filename1, name1, id_conversion):
 		for mapping in upid_to_NOG:
 			mapfile.write(mapping + "\t" + upid_to_NOG[mapping] + "\n")	#Each line is a uniprot ID and an OG id
 		mapfile.close()
+		
+		#Use the taxids to build a map file for OGs to each taxid they have a member in, named "og_to_taxid_*.txt"
+		print("Writing taxonomy matrix file.")
+		taxonfilename = "og_to_taxid_" + nowstring + ".txt"
+		taxonfile = open(taxonfilename, "w+b")
+		for mapping in og_taxid_map:
+			taxonfile.write(mapping + "\t" + "\t".join(og_taxid_map[mapping]) + "\n")	#Each line is an OG then a list of taxids
+		taxonfile.close()
 	
 	print("***Species comparison: Work in progress.***")
 	component_con_file_name = name1 + "_component_conservation.txt"
 	cplx_con_file_name = name1 + "_complex_conservation.txt"
 	
 	exp_complexes = {} #Complex names are keys, members are values
-	uniprot_to_og = {} #Uniprot IDs are keys, members are eggNOG OG IDs
+	uniprot_to_og = {} #ALL available Uniprot IDs are keys, members are eggNOG OG IDs
+		#Can only include UPIDs mapped to eggNOG IDs
+	og_to_taxid = {} #All the taxids this OG has members in, as per the member files
+	unified_components = []		#All protein complex components, as UPIDs
+	component_ogs = {}	#Component UPIDs are keys, members are corresponding OGs
+	unmapped_components = []	#Any UPID not found in the eggNOG ID conversion file
+	og_list = []	#Just the unique OGs in use
+	ready_to_map = False
 	
-	map_file_list = glob.glob("uniprot_og_maps_*.txt")
-	if len(map_file_list) >0:
-		if len(map_file_list) == 1:
-			print("Found map file %s on disk." % map_file_list[0])
-			with open(map_file_list[0]) as id_map_file:
-				for line in id_map_file:
-					line_content = (line.rstrip()).split("\t")
-					uniprot_to_og[line_content[0]] = line_content[1]
+	while not ready_to_map:
+		map_file_list = glob.glob("uniprot_og_maps_*.txt")
+		taxon_file_list = glob.glob("og_to_taxid_*.txt")
+		if len(map_file_list) >0 and len(taxon_file_list) >0:
+			if len(map_file_list) == 1:
+				print("Found map file %s on disk." % map_file_list[0])
+				with open(map_file_list[0]) as id_map_file:
+					for line in id_map_file:
+						line_content = (line.rstrip()).split("\t")
+						uniprot_to_og[line_content[0]] = line_content[1]
+			else:
+				sys.exit("Found more than one map file on disk. Please check for duplicates.")
+			if len(taxon_file_list) == 1:
+				print("Found OG vs taxon file %s on disk." % taxon_file_list[0])
+				with open(taxon_file_list[0]) as taxon_file:
+					for line in taxon_file:
+						og_to_taxid[line_content[0]] = line_content[1]
+			else:
+				sys.exit("Found more than one OG vs taxon file on disk. Please check for duplicates.")
+			ready_to_map = True
 		else:
-			sys.exit("Found more than one map file on disk. Please check for duplicates.")
-	else:
-		print("Could not find protein ID map file. Attempting to rebuild...")
-		get_eggnog_maps()
+			print("A protein map or a taxon file is missing. Rebuilding them...")
+			get_eggnog_maps()
 	
 	with open(filename1) as file1:
 		file1.readline()	#skip the header
@@ -425,8 +455,6 @@ def compareSpecies(filename1, name1, id_conversion):
 			else:
 				exp_complexes[complex_name] = [line_content[0]]
 	
-	unified_components = []		#All protein complex components, as UPIDs
-	component_ogs = {}	#Component UPIDs are keys, members are corresponding OGs	
 	for name in exp_complexes:
 		for component in exp_complexes[name]:
 			for identifier in id_conversion:
@@ -436,14 +464,17 @@ def compareSpecies(filename1, name1, id_conversion):
 					unified_components.append(identifier)
 	
 	print("Searching for conservation of %s unique proteins." % len(unified_components))
-	unmapped_components = []	#Any UPID not found in the eggNOG ID conversion file
+	
 	for component in unified_components:
 		if component in uniprot_to_og:
-			component_ogs[component] = uniprot_to_og[component]
+			new_og = uniprot_to_og[component]
+			component_ogs[component] = new_og
+			if new_og not in og_list:
+				og_list.append(new_og)
 		else:
 			component_ogs[component] = component
 			unmapped_components.append(component)
-	print("Mapped complex components to %s OGs." % len(component_ogs))
+	print("Mapped complex components to %s OGs." % len(og_list))
 	print("%s complex components did not map to OGs." % len(unmapped_components))
 	
 	with open(component_con_file_name, "w+b") as compared_file:
@@ -517,7 +548,9 @@ else:
 taxon_comparison_choice = raw_input("Compare the experimental complex set across species? Y/N\n")
 if taxon_comparison_choice.lower() == "y":
 	taxcompare_file_names = compareSpecies(filename1, name1, id_conversion)
-	print("Broad taxonomic comparison complete. See %s." % taxcompare_file_names[0])
+	print("Broad taxonomic comparison complete. \n" + 
+		"See %s for component conservation and %s for complex conservation."
+		% (taxcompare_file_names[0], taxcompare_file_names[1]))
 else:
 	taxon_comparison = False
 
