@@ -323,10 +323,11 @@ def compareSpecies(filename1, name1, id_conversion):
 				outfile.close()
 				
 		#Clean up by removing compressed files
-		print("\nRemoving compressed files.")
+		
 		all_compressed_files = [convfilename, nogfilename, bactnogfilename]
 		for filename in all_compressed_files:
 			if os.path.isfile(filename):
+				print("\nRemoving compressed file: %s" % filename)
 				os.remove(filename)
 		
 		#Load and filter the ID conversion file as dictionary
@@ -404,7 +405,8 @@ def compareSpecies(filename1, name1, id_conversion):
 		taxonfilename = "og_to_taxid_" + nowstring + ".txt"
 		taxonfile = open(taxonfilename, "w+b")
 		for mapping in og_taxid_map:
-			taxonfile.write(mapping + "\t" + "\t".join(og_taxid_map[mapping]) + "\n")	#Each line is an OG then a list of taxids
+			taxonfile.write(mapping + "\t" + " ".join(og_taxid_map[mapping]) + "\n")	#Each line is an OG then a list of taxids 
+			#Taxids separated by space
 		taxonfile.close()
 	
 	print("***Species comparison: Work in progress.***")
@@ -419,6 +421,8 @@ def compareSpecies(filename1, name1, id_conversion):
 	component_ogs = {}	#Component UPIDs are keys, members are corresponding OGs
 	unmapped_components = []	#Any UPID not found in the eggNOG ID conversion file
 	og_list = []	#Just the unique OGs in use
+	all_taxids = [] #All taxids in use. Don't care about parents or children here.
+	all_cplx_taxids = [] #All taxids relevant to the complex components.
 	ready_to_map = False
 	
 	while not ready_to_map:
@@ -427,19 +431,33 @@ def compareSpecies(filename1, name1, id_conversion):
 		if len(map_file_list) >0 and len(taxon_file_list) >0:
 			if len(map_file_list) == 1:
 				print("Found map file %s on disk." % map_file_list[0])
+				print("Loading file...")
 				with open(map_file_list[0]) as id_map_file:
+					linecount = 0
 					for line in id_map_file:
+						linecount = linecount +1
+						if linecount % 10000 == 0:
+							sys.stdout.write(".")
 						line_content = (line.rstrip()).split("\t")
 						uniprot_to_og[line_content[0]] = line_content[1]
 			else:
 				sys.exit("Found more than one map file on disk. Please check for duplicates.")
 			if len(taxon_file_list) == 1:
-				print("Found OG vs taxon file %s on disk." % taxon_file_list[0])
+				print("\nFound OG vs taxon file %s on disk." % taxon_file_list[0])
+				print("Loading file...")
 				with open(taxon_file_list[0]) as taxon_file:
+					linecount = 0
 					for line in taxon_file:
-						og_to_taxid[line_content[0]] = line_content[1]
+						linecount = linecount +1
+						if linecount % 10000 == 0:
+							sys.stdout.write(".")
+						line_content = (line.rstrip()).split("\t")
+						og_to_taxid[line_content[0]] = line_content[1].split(" ")
+						for taxid in line_content[1].split(" "):
+							if taxid not in all_taxids:
+								all_taxids.append(taxid)
 			else:
-				sys.exit("Found more than one OG vs taxon file on disk. Please check for duplicates.")
+				sys.exit("\nFound more than one OG vs taxon file on disk. Please check for duplicates.")
 			ready_to_map = True
 		else:
 			print("A protein map or a taxon file is missing. Rebuilding them...")
@@ -463,7 +481,7 @@ def compareSpecies(filename1, name1, id_conversion):
 					#print(component + "\t" + identifier)
 					unified_components.append(identifier)
 	
-	print("Searching for conservation of %s unique proteins." % len(unified_components))
+	print("\nSearching for conservation of %s unique proteins." % len(unified_components))
 	
 	for component in unified_components:
 		if component in uniprot_to_og:
@@ -474,14 +492,26 @@ def compareSpecies(filename1, name1, id_conversion):
 		else:
 			component_ogs[component] = component
 			unmapped_components.append(component)
+	
+	for og in og_list:
+		if og in og_to_taxid:
+			for taxid in og_to_taxid[og]:
+				if taxid not in all_cplx_taxids:
+					all_cplx_taxids.append(taxid)
+					
 	print("Mapped complex components to %s OGs." % len(og_list))
 	print("%s complex components did not map to OGs." % len(unmapped_components))
+	print("Orthologs of these components are found across %s taxids." % len(all_cplx_taxids)) 
 	
 	with open(component_con_file_name, "w+b") as compared_file:
-		compared_file.write("EMPTY")
+		compared_file.write("\t" + "\t".join(all_cplx_taxids) + "\n")
+		for og in og_list:
+			compared_file.write(og + "\n")
 		
 	with open(cplx_con_file_name, "w+b") as compared_file:
-		compared_file.write("EMPTY")
+		compared_file.write("\t" + "\t".join(all_cplx_taxids) + "\n")
+		for complex_name in exp_complexes:
+			compared_file.write(complex_name + "\n")
 
 	compared_file_names = [component_con_file_name, cplx_con_file_name]
 	return compared_file_names	
