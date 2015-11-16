@@ -106,7 +106,7 @@ def getEcoliIDs():
 	id_file.seek(0)
 	capturing = 0	#Don't want the header so we iterate past it
 	first_id = "b0001" #For E. coli, this should be the first identifier
-	ecoli_ids = {}
+	ecoli_ids = {}	#UniprotAC IDs are keys, bcode and jwcode are values
 	for line in id_file:
 		if first_id in line:
 			capturing = 1
@@ -409,7 +409,7 @@ def compareSpecies(filename1, name1, id_conversion):
 			#Taxids separated by space
 		taxonfile.close()
 	
-	print("***Species comparison: Work in progress.***")
+	print("***Species comparison***")
 	component_con_file_name = name1 + "_component_conservation.txt"
 	cplx_con_file_name = name1 + "_complex_conservation.txt"
 	
@@ -452,8 +452,9 @@ def compareSpecies(filename1, name1, id_conversion):
 						if linecount % 10000 == 0:
 							sys.stdout.write(".")
 						line_content = (line.rstrip()).split("\t")
-						og_to_taxid[line_content[0]] = line_content[1].split(" ")
-						for taxid in line_content[1].split(" "):
+						these_taxids = line_content[1].split(" ")
+						og_to_taxid[line_content[0]] = these_taxids
+						for taxid in these_taxids:
 							if taxid not in all_taxids:
 								all_taxids.append(taxid)
 			else:
@@ -463,23 +464,30 @@ def compareSpecies(filename1, name1, id_conversion):
 			print("A protein map or a taxon file is missing. Rebuilding them...")
 			get_eggnog_maps()
 	
-	with open(filename1) as file1:
+	with open(filename1) as file1:	#Open the input complex file
 		file1.readline()	#skip the header
 		for line in file1:
 			line_content = (line.rstrip()).split()
 			complex_name = name1 + "_" + line_content[1]
-			if complex_name in exp_complexes:
+			if complex_name in exp_complexes:	#Load each complex, though we don't know ID format
 				exp_complexes[complex_name].append(line_content[0])
 			else:
 				exp_complexes[complex_name] = [line_content[0]]
 	
+	exp_complexes_unified = {} #The experimental complexes, but with Uniprot component IDs
+	#The components may already have Uniprot IDs - in this case they won't change
+	
 	for name in exp_complexes:
+		these_components = []
 		for component in exp_complexes[name]:
 			for identifier in id_conversion:
 				expanded_ids = id_conversion[identifier]
 				if component in expanded_ids:
 					#print(component + "\t" + identifier)
 					unified_components.append(identifier)
+					these_components.append(identifier)
+		exp_complexes_unified[name] = these_components
+	exp_complexes = exp_complexes_unified
 	
 	print("\nSearching for conservation of %s unique proteins." % len(unified_components))
 	
@@ -503,15 +511,66 @@ def compareSpecies(filename1, name1, id_conversion):
 	print("%s complex components did not map to OGs." % len(unmapped_components))
 	print("Orthologs of these components are found across %s taxids." % len(all_cplx_taxids)) 
 	
+	print("Preparing component conservation survey...")
 	with open(component_con_file_name, "w+b") as compared_file:
 		compared_file.write("\t" + "\t".join(all_cplx_taxids) + "\n")
+		linecount = 0
 		for og in og_list:
-			compared_file.write(og + "\n")
-		
+			linecount = linecount +1
+			if linecount % 100 == 0:
+				sys.stdout.write(".")
+			compared_file.write(og + "\t")
+			i = 0
+			for taxid in all_cplx_taxids:
+				i = i +1
+				if taxid in og_to_taxid[og]:
+					compared_file.write("1")
+				else:
+					compared_file.write("0")
+				if i < len(all_cplx_taxids):
+					compared_file.write("\t")
+			compared_file.write("\n")
+	sys.stdout.write("Done.")
+	
+	print("\nPreparing complex conservation survey...")	
 	with open(cplx_con_file_name, "w+b") as compared_file:
 		compared_file.write("\t" + "\t".join(all_cplx_taxids) + "\n")
+		linecount = 0
 		for complex_name in exp_complexes:
-			compared_file.write(complex_name + "\n")
+			linecount = linecount +1
+			if linecount % 10 == 0:
+				sys.stdout.write(".")
+			compared_file.write(complex_name + "\t")
+			these_og_components = []
+			these_components = exp_complexes[complex_name]
+			#print(these_components)
+			for component in these_components:
+				if component in unmapped_components:
+					#We don't have an OG map for this protein
+					#so it gets set to zero so we don't try to
+					#search for it a few lines later
+					these_og_components.append("0")
+				else:
+					og_component = uniprot_to_og[component]
+					these_og_components.append(og_component)
+			i = 0
+			for taxid in all_cplx_taxids:
+				i = i +1
+				conserv_total = 0
+				conserv_fraction = 0
+				for og_component in these_og_components:
+					if og_component == "0":
+						continue
+					if taxid in og_to_taxid[og_component]:
+						conserv_total = conserv_total +1
+					else:
+						conserv_total = conserv_total
+				conserv_fraction = conserv_total / float(len(these_components))
+				compared_file.write("%5.4f" % conserv_fraction)
+				if i < len(all_cplx_taxids):
+						compared_file.write("\t")
+			compared_file.write("\n")
+	sys.stdout.write("Done.")
 
 	compared_file_names = [component_con_file_name, cplx_con_file_name]
 	return compared_file_names	
@@ -578,7 +637,7 @@ else:
 taxon_comparison_choice = raw_input("Compare the experimental complex set across species? Y/N\n")
 if taxon_comparison_choice.lower() == "y":
 	taxcompare_file_names = compareSpecies(filename1, name1, id_conversion)
-	print("Broad taxonomic comparison complete. \n" + 
+	print("\nBroad taxonomic comparison complete.\n" + 
 		"See %s for component conservation and %s for complex conservation."
 		% (taxcompare_file_names[0], taxcompare_file_names[1]))
 else:
